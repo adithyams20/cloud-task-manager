@@ -46,6 +46,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      
+      
       - name: Initialize database
         run: |
           node <<'NODE'
@@ -53,10 +55,22 @@ jobs:
           const { Client } = require("pg");
 
           async function initializeDatabase() {
-            const client = new Client();
-            await client.connect();
-            await client.query(fs.readFileSync("init.sql", "utf8"));
-            await client.end();
+            const client = new Client({
+              host: process.env.DB_HOST,
+              port: Number(process.env.DB_PORT),
+              user: process.env.DB_USER,
+              password: process.env.DB_PASSWORD,
+              database: process.env.DB_NAME
+            });
+
+            try {
+              await client.connect();
+              const sql = fs.readFileSync("init.sql", "utf8");
+              await client.query(sql);
+              console.log("Database initialized successfully.");
+            } finally {
+              await client.end();
+            }
           }
 
           initializeDatabase().catch((error) => {
@@ -64,6 +78,7 @@ jobs:
             process.exit(1);
           });
           NODE
+
 
       - name: Run automated tests
         run: npm test
