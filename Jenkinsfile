@@ -12,10 +12,9 @@ pipeline {
 
         stage('Check Environment') {
             steps {
-                bat 'node --version'
-                bat 'npm --version'
+                sh 'echo "Jenkins pipeline is running"'
+                sh 'git --version'
             }
         }
     }
 }
-
