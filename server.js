@@ -1,27 +1,32 @@
 
 const express = require("express");
+const pool = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+// Homepage
 app.get("/", (req, res) => {
     res.send("Welcome to Cloud Task Manager!");
 });
 
-const tasks = [
-    { id: 1, title: "Learn Docker", completed: false },
-    { id: 2, title: "Deploy to the cloud", completed: true }
-];
-
-// READ
-app.get("/api/tasks", (req, res) => {
-    res.json(tasks);
+// READ: Get all tasks
+app.get("/api/tasks", async (req, res) => {
+    try {
+        const result = await pool.query(
+            "SELECT * FROM tasks ORDER BY id"
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error("Error fetching tasks:", error.message);
+        res.status(500).json({ error: "Failed to fetch tasks" });
+    }
 });
 
-// CREATE
-app.post("/api/tasks", (req, res) => {
+// CREATE: Add a task
+app.post("/api/tasks", async (req, res) => {
     const { title } = req.body;
 
     if (typeof title !== "string" || !title.trim()) {
@@ -30,70 +35,105 @@ app.post("/api/tasks", (req, res) => {
         });
     }
 
-    const newTask = {
-        id: tasks.length
-            ? Math.max(...tasks.map(task => task.id)) + 1
-            : 1,
-        title: title.trim(),
-        completed: false
-    };
-
-    tasks.push(newTask);
-    res.status(201).json(newTask);
+    try {
+        const result = await pool.query(
+            "INSERT INTO tasks (title) VALUES ($1) RETURNING *",
+            [title.trim()]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error("Error creating task:", error.message);
+        res.status(500).json({ error: "Failed to create task" });
+    }
 });
 
-// UPDATE
-app.put("/api/tasks/:id", (req, res) => {
+// UPDATE: Change a task
+app.put("/api/tasks/:id", async (req, res) => {
     const id = Number(req.params.id);
-    const task = tasks.find(task => task.id === id);
-
-    if (!task) {
-        return res.status(404).json({ error: "Task not found" });
-    }
-
     const { title, completed } = req.body;
 
-    if (title !== undefined) {
-        if (typeof title !== "string" || !title.trim()) {
-            return res.status(400).json({
-                error: "Title must be a non-empty string"
-            });
-        }
-
-        task.title = title.trim();
+    if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "Invalid task ID" });
     }
 
-    if (completed !== undefined) {
-        if (typeof completed !== "boolean") {
-            return res.status(400).json({
-                error: "Completed must be true or false"
-            });
-        }
-
-        task.completed = completed;
+    if (title === undefined && completed === undefined) {
+        return res.status(400).json({
+            error: "Provide a title or completed value"
+        });
     }
 
-    res.json(task);
+    if (title !== undefined &&
+        (typeof title !== "string" || !title.trim())) {
+        return res.status(400).json({
+            error: "Title must be a non-empty string"
+        });
+    }
+
+    if (completed !== undefined && typeof completed !== "boolean") {
+        return res.status(400).json({
+            error: "Completed must be true or false"
+        });
+    }
+
+    try {
+        const existing = await pool.query(
+            "SELECT * FROM tasks WHERE id = $1",
+            [id]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: "Task not found" });
+        }
+
+        const current = existing.rows[0];
+        const newTitle = title === undefined ? current.title : title.trim();
+        const newCompleted = completed === undefined
+            ? current.completed
+            : completed;
+
+        const result = await pool.query(
+            `UPDATE tasks
+             SET title = $1, completed = $2
+             WHERE id = $3
+             RETURNING *`,
+            [newTitle, newCompleted, id]
+        );
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error("Error updating task:", error.message);
+        res.status(500).json({ error: "Failed to update task" });
+    }
 });
 
-// DELETE
-app.delete("/api/tasks/:id", (req, res) => {
+// DELETE: Remove a task
+app.delete("/api/tasks/:id", async (req, res) => {
     const id = Number(req.params.id);
-    const index = tasks.findIndex(task => task.id === id);
 
-    if (index === -1) {
-        return res.status(404).json({ error: "Task not found" });
+    if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: "Invalid task ID" });
     }
 
-    const deletedTask = tasks.splice(index, 1)[0];
+    try {
+        const result = await pool.query(
+            "DELETE FROM tasks WHERE id = $1 RETURNING *",
+            [id]
+        );
 
-    res.json({
-        message: "Task deleted successfully",
-        task: deletedTask
-    });
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "Task not found" });
+        }
+
+        res.json({
+            message: "Task deleted successfully",
+            task: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Error deleting task:", error.message);
+        res.status(500).json({ error: "Failed to delete task" });
+    }
 });
 
-// Start the server only when this file is run directly
 if (require.main === module) {
     app.listen(PORT, "0.0.0.0", () => {
         console.log(`Server running on port ${PORT}`);
