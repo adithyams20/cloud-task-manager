@@ -1,14 +1,37 @@
+
 name: Cloud Task Manager CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop, 'feature/**']
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: taskuser
+          POSTGRES_PASSWORD: localdev123
+          POSTGRES_DB: taskmanager
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taskuser -d taskmanager"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: taskuser
+      DB_PASSWORD: localdev123
+      DB_NAME: taskmanager
 
     steps:
       - name: Checkout code
@@ -22,6 +45,40 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      
+      
+      - name: Initialize database
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const { Client } = require("pg");
+
+          async function initializeDatabase() {
+            const client = new Client({
+              host: process.env.DB_HOST,
+              port: Number(process.env.DB_PORT),
+              user: process.env.DB_USER,
+              password: process.env.DB_PASSWORD,
+              database: process.env.DB_NAME
+            });
+
+            try {
+              await client.connect();
+              const sql = fs.readFileSync("init.sql", "utf8");
+              await client.query(sql);
+              console.log("Database initialized successfully.");
+            } finally {
+              await client.end();
+            }
+          }
+
+          initializeDatabase().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
 
       - name: Run automated tests
         run: npm test
